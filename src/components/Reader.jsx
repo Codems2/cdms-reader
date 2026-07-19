@@ -64,17 +64,49 @@ function PagedReader({ book, page, setPage, rtl, fit, load, onToggleBars }) {
     [setPage, book.pageCount],
   )
 
-  // En RTL, la zona izquierda avanza y la derecha retrocede.
+  // En RTL, la zona/lado izquierdo avanza y el derecho retrocede.
   const onLeft = rtl ? next : prev
   const onRight = rtl ? prev : next
 
+  // Gestos: un mismo puntero sirve para tocar (tercios) y para deslizar (swipe).
+  const start = useRef(null)
+  const onPointerDown = (e) => {
+    start.current = { x: e.clientX, y: e.clientY }
+  }
+  const onPointerUp = (e) => {
+    const s = start.current
+    start.current = null
+    if (!s) return
+    const dx = e.clientX - s.x
+    const dy = e.clientY - s.y
+    const ax = Math.abs(dx)
+    const ay = Math.abs(dy)
+
+    // Deslizar horizontal → pasar página (coherente con los tercios: izq = onLeft).
+    if (ax > 40 && ax > ay) {
+      if (dx < 0) onLeft()
+      else onRight()
+      return
+    }
+    // Toque (sin apenas movimiento): por tercios de la pantalla.
+    if (ax < 12 && ay < 12) {
+      const r = e.currentTarget.getBoundingClientRect()
+      const x = e.clientX - r.left
+      if (x < r.width / 3) onLeft()
+      else if (x > (r.width * 2) / 3) onRight()
+      else onToggleBars()
+    }
+  }
+
   return (
-    <div className={`viewport ${fit === 'width' ? 'fit-width' : ''}`}>
+    <div
+      className={`viewport ${fit === 'width' ? 'fit-width' : ''}`}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => (start.current = null)}
+    >
       {loadingPage && <div className="loading-page">Cargando…</div>}
       {url && <img className="page-img" src={url} alt={`Página ${page + 1}`} draggable={false} />}
-      <div className="tap-zone left" onClick={onLeft} />
-      <div className="tap-zone center" onClick={onToggleBars} />
-      <div className="tap-zone right" onClick={onRight} />
     </div>
   )
 }

@@ -5,10 +5,10 @@ on:
     branches: [main, claude/manga-reader-web-port-tun5gh]
   workflow_dispatch:
 
-# Solo necesita escribir en el repo (para publicar la rama gh-pages).
-# No usa la API de Pages, así que no requiere permisos que el token no tiene.
+# contents: para publicar la rama gh-pages; pages: para pedir el rebuild.
 permissions:
   contents: write
+  pages: write
 
 concurrency:
   group: pages-deploy
@@ -45,5 +45,19 @@ jobs:
           git add -A
           git commit -m "Deploy ${GITHUB_SHA}"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # Los pushes del bot a gh-pages NO disparan un rebuild de Pages por sí solos.
+      # Lo pedimos explícitamente para que la CDN publique la versión recién subida.
+      - name: Solicitar rebuild de GitHub Pages
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages/builds")
+          echo "POST /pages/builds -> HTTP $code"
+          # 201 = build encolado. No fallar el job si Pages tarda en responder.
+          test "$code" = "201" || echo "Aviso: respuesta inesperada ($code), Pages puede reconstruir igualmente."
         env:
           GITHUB_TOKEN: ${{ github.token }}

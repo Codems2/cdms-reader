@@ -348,6 +348,9 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Permite scroll vertical (modo "ancho") pero deja los swipes horizontales
+     para pasar página en vez de que el navegador los interprete como gesto. */
+  touch-action: pan-y;
 }
 
 .viewport img.page-img {
