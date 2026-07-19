@@ -1,0 +1,25 @@
+{
+  "name": "cdms-reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lector de manga offline-first (PWA multiplataforma). Lee tus archivos locales CBZ/ZIP, PDF y carpetas de imágenes sin conexión.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "dependencies": {
+    "idb": "^8.0.0",
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}
