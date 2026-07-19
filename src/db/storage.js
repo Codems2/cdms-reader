@@ -41,49 +41,47 @@ function makeId() {
 
 // --- Libros ---------------------------------------------------------------
 
-export async function addBook({ title, format, pages, source }) {
+export async function addBook({ title, format, pages, source }, onProgress) {
   const db = await getDB()
   const id = makeId()
 
-  // IMPORTANTE: convertimos cada imagen a ArrayBuffer ANTES de abrir la
-  // transacción. Safari/iOS no puede guardar objetos File/Blob directamente
-  // en IndexedDB ("Error preparing Blob/File data to be stored in object
-  // store"); los ArrayBuffer sí son compatibles en todos los navegadores.
-  // Además, esperar un await no-IndexedDB dentro de la transacción la cerraría.
-  const prepared = []
+  // Guardamos PÁGINA A PÁGINA en transacciones pequeñas e independientes:
+  //  - Materializamos un blob (getBlob), lo pasamos a ArrayBuffer, lo guardamos
+  //    y liberamos la referencia antes de la siguiente. Así el pico de memoria
+  //    es ~1 página, no el manga entero (evita que Safari/iOS mate la pestaña).
+  //  - Guardamos como ArrayBuffer porque Safari/iOS no admite File/Blob en
+  //    IndexedDB ("Error preparing Blob/File data to be stored in object store").
+  //  - El registro del libro se escribe al FINAL: si algo falla a mitad, no
+  //    queda un libro roto en la biblioteca.
   let size = 0
+  let cover = null
   for (let i = 0; i < pages.length; i++) {
-    const blob = pages[i].blob
+    const blob = await pages[i].getBlob()
     const data = await blob.arrayBuffer()
     size += data.byteLength
-    prepared.push({ name: pages[i].name ?? `page-${i}`, type: blob.type || '', data })
+    await db.put('pages', {
+      bookId: id,
+      index: i,
+      name: pages[i].name ?? `page-${i}`,
+      type: blob.type || '',
+      data,
+    })
+    if (i === 0) cover = { data, type: blob.type || '' }
+    pages[i].getBlob = null // permite liberar memoria de la fuente
+    onProgress?.((i + 1) / pages.length)
   }
-  const cover = prepared[0] ? { data: prepared[0].data, type: prepared[0].type } : null
 
   const book = {
     id,
     title,
     format,
-    pageCount: prepared.length,
+    pageCount: pages.length,
     cover,
     size,
     source: source ?? null,
     createdAt: Date.now(),
   }
-
-  const tx = db.transaction(['books', 'pages'], 'readwrite')
-  await tx.objectStore('books').put(book)
-  const pagesStore = tx.objectStore('pages')
-  for (let i = 0; i < prepared.length; i++) {
-    await pagesStore.put({
-      bookId: id,
-      index: i,
-      name: prepared[i].name,
-      type: prepared[i].type,
-      data: prepared[i].data,
-    })
-  }
-  await tx.done
+  await db.put('books', book)
   return { ...book, cover: recToBlob(cover) }
 }
 

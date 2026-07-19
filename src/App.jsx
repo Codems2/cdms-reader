@@ -83,11 +83,11 @@ export default function App() {
       try {
         // 1) Cada CBZ/ZIP/CBR/PDF -> su propio manga.
         for (const file of containers) {
-          setImporting({ label: `Importando ${file.name}…`, progress: 0 })
-          const result = await importFile(file, (p) =>
-            setImporting({ label: `Importando ${file.name}…`, progress: p }),
+          setImporting({ label: `Leyendo ${file.name}…`, progress: 0 })
+          const result = await importFile(file)
+          await addBook(result, (p) =>
+            setImporting({ label: `Importando ${file.name}… (${Math.round(p * 100)}%)`, progress: p }),
           )
-          await addBook(result)
         }
 
         // 2) Imágenes agrupadas por carpeta (un manga por carpeta).
@@ -95,10 +95,10 @@ export default function App() {
           const groups = groupImages(images, asFolder)
           for (const g of groups) {
             setImporting({ label: `Importando ${g.title}…`, progress: 0 })
-            const result = await importImages(g.files, g.title, (p) =>
+            const result = importImages(g.files, g.title)
+            await addBook(result, (p) =>
               setImporting({ label: `Importando ${g.title}… (${Math.round(p * 100)}%)`, progress: p }),
             )
-            await addBook(result)
           }
         }
 
