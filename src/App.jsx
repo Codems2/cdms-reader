@@ -15,6 +15,31 @@ import {
 
 const DEFAULT_SETTINGS = { mode: 'paged-rtl', fit: 'contain' }
 
+// Agrupa imágenes en "mangas": una carpeta = un manga. Si vienen de una
+// selección de archivos sueltos (sin rutas), todas forman un único manga.
+function groupImages(images, asFolder) {
+  const hasPaths = images.some((f) => f.webkitRelativePath)
+  if (!asFolder && !hasPaths) {
+    const title =
+      images.length > 1 ? 'Manga importado' : images[0].name.replace(/\.[^.]+$/, '')
+    return [{ title, files: images }]
+  }
+  const map = new Map()
+  for (const f of images) {
+    const rel = f.webkitRelativePath || f.name
+    const parts = rel.split('/')
+    const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.'
+    if (!map.has(dir)) map.set(dir, [])
+    map.get(dir).push(f)
+  }
+  return [...map.entries()]
+    .map(([dir, files]) => ({
+      title: dir === '.' ? 'Manga importado' : dir.split('/').pop(),
+      files,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }))
+}
+
 export default function App() {
   const online = useOnline()
   const [books, setBooks] = useState([])
@@ -45,31 +70,42 @@ export default function App() {
 
   // --- Importación --------------------------------------------------------
   const handleFiles = useCallback(
-    async (fileList) => {
+    async (fileList, { asFolder = false } = {}) => {
       const files = Array.from(fileList)
       if (files.length === 0) return
 
-      // Si todo son imágenes sueltas, se tratan como un solo manga.
-      const allImages = files.every((f) => detectFormat(f) === 'image')
+      // Clasifica: contenedores (cada uno es un manga) e imágenes (se agrupan).
+      const containers = files.filter((f) =>
+        ['zip', 'pdf', 'rar'].includes(detectFormat(f)),
+      )
+      const images = files.filter((f) => detectFormat(f) === 'image')
+
       try {
-        if (allImages) {
-          const guessTitle =
-            files[0].webkitRelativePath?.split('/')[0] ||
-            (files.length > 1 ? 'Manga importado' : files[0].name.replace(/\.[^.]+$/, ''))
-          setImporting({ label: `Importando ${files.length} imágenes…`, progress: 0 })
-          const result = await importImages(files, guessTitle, (p) =>
-            setImporting({ label: `Importando imágenes…`, progress: p }),
+        // 1) Cada CBZ/ZIP/CBR/PDF -> su propio manga.
+        for (const file of containers) {
+          setImporting({ label: `Importando ${file.name}…`, progress: 0 })
+          const result = await importFile(file, (p) =>
+            setImporting({ label: `Importando ${file.name}…`, progress: p }),
           )
           await addBook(result)
-        } else {
-          // Cada CBZ/ZIP/PDF es un manga independiente.
-          for (const file of files) {
-            setImporting({ label: `Importando ${file.name}…`, progress: 0 })
-            const result = await importFile(file, (p) =>
-              setImporting({ label: `Importando ${file.name}…`, progress: p }),
+        }
+
+        // 2) Imágenes agrupadas por carpeta (un manga por carpeta).
+        if (images.length > 0) {
+          const groups = groupImages(images, asFolder)
+          for (const g of groups) {
+            setImporting({ label: `Importando ${g.title}…`, progress: 0 })
+            const result = await importImages(g.files, g.title, (p) =>
+              setImporting({ label: `Importando ${g.title}… (${Math.round(p * 100)}%)`, progress: p }),
             )
             await addBook(result)
           }
+        }
+
+        if (containers.length === 0 && images.length === 0) {
+          throw new Error(
+            'No se encontraron archivos compatibles (CBZ, ZIP, CBR, PDF o imágenes).',
+          )
         }
         await refresh()
       } catch (err) {
@@ -165,7 +201,7 @@ export default function App() {
         directory=""
         multiple
         onChange={(e) => {
-          handleFiles(e.target.files)
+          handleFiles(e.target.files, { asFolder: true })
           e.target.value = ''
         }}
       />
