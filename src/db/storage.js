@@ -44,15 +44,27 @@ function makeId() {
 export async function addBook({ title, format, pages, source }) {
   const db = await getDB()
   const id = makeId()
-  const cover = pages[0]?.blob ?? null
+
+  // IMPORTANTE: convertimos cada imagen a ArrayBuffer ANTES de abrir la
+  // transacción. Safari/iOS no puede guardar objetos File/Blob directamente
+  // en IndexedDB ("Error preparing Blob/File data to be stored in object
+  // store"); los ArrayBuffer sí son compatibles en todos los navegadores.
+  // Además, esperar un await no-IndexedDB dentro de la transacción la cerraría.
+  const prepared = []
   let size = 0
-  for (const p of pages) size += p.blob?.size ?? 0
+  for (let i = 0; i < pages.length; i++) {
+    const blob = pages[i].blob
+    const data = await blob.arrayBuffer()
+    size += data.byteLength
+    prepared.push({ name: pages[i].name ?? `page-${i}`, type: blob.type || '', data })
+  }
+  const cover = prepared[0] ? { data: prepared[0].data, type: prepared[0].type } : null
 
   const book = {
     id,
     title,
     format,
-    pageCount: pages.length,
+    pageCount: prepared.length,
     cover,
     size,
     source: source ?? null,
@@ -62,27 +74,40 @@ export async function addBook({ title, format, pages, source }) {
   const tx = db.transaction(['books', 'pages'], 'readwrite')
   await tx.objectStore('books').put(book)
   const pagesStore = tx.objectStore('pages')
-  for (let i = 0; i < pages.length; i++) {
+  for (let i = 0; i < prepared.length; i++) {
     await pagesStore.put({
       bookId: id,
       index: i,
-      name: pages[i].name ?? `page-${i}`,
-      blob: pages[i].blob,
+      name: prepared[i].name,
+      type: prepared[i].type,
+      data: prepared[i].data,
     })
   }
   await tx.done
-  return book
+  return { ...book, cover: recToBlob(cover) }
+}
+
+// Reconstruye un Blob a partir de lo guardado. Soporta el formato nuevo
+// ({ data: ArrayBuffer, type }) y filas antiguas que guardaban un Blob directo.
+function recToBlob(rec) {
+  if (!rec) return null
+  if (rec instanceof Blob) return rec
+  if (rec.data) return new Blob([rec.data], { type: rec.type || 'application/octet-stream' })
+  return null
 }
 
 export async function getBooks() {
   const db = await getDB()
   const all = await db.getAll('books')
-  return all.sort((a, b) => b.createdAt - a.createdAt)
+  return all
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((b) => ({ ...b, cover: recToBlob(b.cover) }))
 }
 
 export async function getBook(id) {
   const db = await getDB()
-  return db.get('books', id)
+  const b = await db.get('books', id)
+  return b ? { ...b, cover: recToBlob(b.cover) } : b
 }
 
 export async function deleteBook(id) {
@@ -104,7 +129,11 @@ export async function deleteBook(id) {
 
 export async function getPage(bookId, index) {
   const db = await getDB()
-  return db.get('pages', [bookId, index])
+  const row = await db.get('pages', [bookId, index])
+  if (!row) return null
+  // Fila nueva: { data, type }. Fila antigua: { blob }.
+  const blob = row.blob ? recToBlob(row.blob) : recToBlob(row)
+  return { name: row.name, blob }
 }
 
 // --- Progreso -------------------------------------------------------------
