@@ -145,12 +145,13 @@ export default function App() {
       </main>
 
       {/* Inputs ocultos */}
+      {/* Sin atributo accept: en Android/iOS los .cbz/.cbr no tienen tipo MIME
+          registrado y el selector los bloquea. Validamos el formato en código. */}
       <input
         ref={fileInputRef}
         className="visually-hidden"
         type="file"
         multiple
-        accept=".cbz,.zip,.pdf,image/*"
         onChange={(e) => {
           handleFiles(e.target.files)
           e.target.value = ''

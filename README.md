@@ -9,7 +9,7 @@ internet. Nacido como port web de una app de Android de lectura de manga.
 
 ## Características
 
-- **Formatos**: `.cbz` / `.zip`, `.pdf` y carpetas de imágenes (JPG, PNG, WebP, GIF, AVIF…).
+- **Formatos**: `.cbz` / `.zip`, `.cbr` / `.rar`, `.pdf` y carpetas de imágenes (JPG, PNG, WebP, GIF, AVIF…).
 - **Biblioteca local** con portadas, número de páginas y barra de progreso.
 - **Lector** con tres modos:
   - Página, derecha→izquierda (manga) — por defecto
@@ -49,7 +49,8 @@ npm run icons     # regenera los iconos PWA (public/icons)
 src/
   App.jsx                 orquestador: biblioteca, importación, lector
   db/storage.js           capa IndexedDB (libros, páginas, progreso, ajustes)
-  import/parsers.js        parseo de CBZ/ZIP (JSZip), PDF (pdf.js) e imágenes
+  import/parsers.js        parseo de CBZ/ZIP (JSZip), CBR/RAR (node-unrar-js),
+                           PDF (pdf.js) e imágenes
   components/
     Library.jsx           rejilla de portadas
     Reader.jsx            lector paginado y vertical, con cache de páginas
@@ -65,12 +66,12 @@ La `base` se ajusta automáticamente a `/<nombre-del-repo>/`.
 
 ## Stack
 
-React + Vite · vite-plugin-pwa (Workbox) · IndexedDB (`idb`) · JSZip · pdf.js.
+React + Vite · vite-plugin-pwa (Workbox) · IndexedDB (`idb`) · JSZip · node-unrar-js · pdf.js.
 
 ## Notas y limitaciones
 
-- **CBR/RAR** aún no está soportado (requiere descompresión RAR en el navegador).
-  Convierte a CBZ/ZIP mientras tanto.
+- El **CBR/RAR** se descomprime en el navegador con `node-unrar-js` (WASM). Funciona
+  offline, pero los archivos muy grandes consumen memoria al extraerse.
 - El espacio disponible depende de la cuota de almacenamiento del navegador. Para
   bibliotecas grandes, considera aceptar el almacenamiento persistente cuando el
   navegador lo ofrezca.
