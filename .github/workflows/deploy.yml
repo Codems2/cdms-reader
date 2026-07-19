@@ -2,7 +2,7 @@ name: Deploy PWA to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/manga-reader-web-port-tun5gh]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Activa GitHub Pages automáticamente si aún no lo está (requiere plan
+      # con Pages disponible para el repo).
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
