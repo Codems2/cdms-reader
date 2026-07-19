@@ -81,13 +81,16 @@ export default function App() {
       const images = files.filter((f) => detectFormat(f) === 'image')
 
       try {
+        let totalFailedPages = 0
+
         // 1) Cada CBZ/ZIP/CBR/PDF -> su propio manga.
         for (const file of containers) {
           setImporting({ label: `Leyendo ${file.name}…`, progress: 0 })
           const result = await importFile(file)
-          await addBook(result, (p) =>
+          const book = await addBook(result, (p) =>
             setImporting({ label: `Importando ${file.name}… (${Math.round(p * 100)}%)`, progress: p }),
           )
+          totalFailedPages += book.failed || 0
         }
 
         // 2) Imágenes agrupadas por carpeta (un manga por carpeta).
@@ -96,9 +99,10 @@ export default function App() {
           for (const g of groups) {
             setImporting({ label: `Importando ${g.title}…`, progress: 0 })
             const result = importImages(g.files, g.title)
-            await addBook(result, (p) =>
+            const book = await addBook(result, (p) =>
               setImporting({ label: `Importando ${g.title}… (${Math.round(p * 100)}%)`, progress: p }),
             )
+            totalFailedPages += book.failed || 0
           }
         }
 
@@ -108,8 +112,20 @@ export default function App() {
           )
         }
         await refresh()
+        if (totalFailedPages > 0) {
+          alert(
+            `Importado, pero ${totalFailedPages} página(s) no se pudieron leer y se omitieron. ` +
+              `Si están en iCloud, descárgalas antes en la app Archivos.`,
+          )
+        }
       } catch (err) {
-        alert(`Error al importar: ${err.message}`)
+        const ioError =
+          err?.name === 'NotReadableError' || /I\/O read|operation failed/i.test(err?.message || '')
+        alert(
+          ioError
+            ? 'Error al importar: no se pudo leer el archivo. Si está en iCloud, ábrelo primero en la app Archivos para descargarlo (o cópialo al dispositivo) y vuelve a intentarlo.'
+            : `Error al importar: ${err.message}`,
+        )
       } finally {
         setImporting(null)
       }

@@ -18,6 +18,22 @@ function isJunk(path) {
   return path.split('/').some((seg) => seg.startsWith('.') || seg === '__MACOSX')
 }
 
+// Lee un archivo a ArrayBuffer con reintentos: en iOS, leer un fichero de
+// iCloud/Archivos puede fallar ("The I/O read operation failed") hasta que
+// termina de estar disponible localmente.
+async function readFileBuffer(file, tries = 3) {
+  let lastErr
+  for (let t = 0; t < tries; t++) {
+    try {
+      return await file.arrayBuffer()
+    } catch (e) {
+      lastErr = e
+      await new Promise((r) => setTimeout(r, 400 * (t + 1)))
+    }
+  }
+  throw lastErr
+}
+
 // Cada "página" es perezosa: { name, getBlob() }. El blob se materializa solo
 // cuando se va a guardar, y se libera enseguida. Así no cargamos todo el manga
 // en memoria a la vez (clave en iOS/Safari, que mata la pestaña por memoria).
@@ -25,7 +41,7 @@ function isJunk(path) {
 // --- CBZ / ZIP ------------------------------------------------------------
 
 export async function parseZip(file) {
-  const zip = await JSZip.loadAsync(file)
+  const zip = await JSZip.loadAsync(await readFileBuffer(file))
   const entries = Object.values(zip.files)
     .filter((e) => !e.dir && IMAGE_EXT.test(e.name) && !isJunk(e.name))
     .sort((a, b) => naturalCompare(a.name, b.name))
@@ -51,7 +67,7 @@ async function getUnrarWasm() {
 
 export async function parseRar(file) {
   const wasmBinary = await getUnrarWasm()
-  const data = await file.arrayBuffer()
+  const data = await readFileBuffer(file)
   const extractor = await createExtractorFromData({ wasmBinary, data })
 
   const headers = [...extractor.getFileList().fileHeaders]
@@ -94,7 +110,7 @@ async function loadPdfJs() {
 
 export async function parsePdf(file, { scale = 2 } = {}) {
   const lib = await loadPdfJs()
-  const data = await file.arrayBuffer()
+  const data = await readFileBuffer(file)
   const pdf = await lib.getDocument({ data }).promise
 
   const pages = []

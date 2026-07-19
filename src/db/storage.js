@@ -55,34 +55,72 @@ export async function addBook({ title, format, pages, source }, onProgress) {
   //    queda un libro roto en la biblioteca.
   let size = 0
   let cover = null
+  let stored = 0 // índice contiguo de páginas realmente guardadas
+  let failed = 0
+  let firstError = null
+
   for (let i = 0; i < pages.length; i++) {
-    const blob = await pages[i].getBlob()
-    const data = await blob.arrayBuffer()
+    let data
+    let type
+    try {
+      // Reintenta: en iOS, leer un archivo de iCloud puede fallar hasta que
+      // termina de descargarse; un par de reintentos con pausa suele bastar.
+      let lastErr
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const blob = await pages[i].getBlob()
+          data = await blob.arrayBuffer()
+          type = blob.type || ''
+          lastErr = null
+          break
+        } catch (e) {
+          lastErr = e
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+        }
+      }
+      if (lastErr) throw lastErr
+    } catch (err) {
+      // Un archivo puede ser ilegible (p. ej. está en iCloud sin descargar).
+      // No abortamos: saltamos esa página y seguimos con el resto.
+      failed++
+      if (!firstError) firstError = err
+      pages[i].getBlob = null
+      continue
+    }
     size += data.byteLength
     await db.put('pages', {
       bookId: id,
-      index: i,
-      name: pages[i].name ?? `page-${i}`,
-      type: blob.type || '',
+      index: stored,
+      name: pages[i].name ?? `page-${stored}`,
+      type,
       data,
     })
-    if (i === 0) cover = { data, type: blob.type || '' }
+    if (stored === 0) cover = { data, type }
+    stored++
     pages[i].getBlob = null // permite liberar memoria de la fuente
     onProgress?.((i + 1) / pages.length)
+  }
+
+  if (stored === 0) {
+    const reason = firstError?.name === 'NotReadableError' || /I\/O/i.test(firstError?.message || '')
+      ? 'No se pudo leer el archivo. Si está en iCloud, ábrelo antes en la app Archivos para descargarlo, o copia el manga al almacenamiento del dispositivo.'
+      : `No se pudo leer ninguna página${firstError ? ` (${firstError.message})` : ''}.`
+    throw new Error(reason)
   }
 
   const book = {
     id,
     title,
     format,
-    pageCount: pages.length,
+    pageCount: stored,
     cover,
     size,
     source: source ?? null,
     createdAt: Date.now(),
+    incomplete: failed > 0 ? failed : undefined,
   }
   await db.put('books', book)
-  return { ...book, cover: recToBlob(cover) }
+  return { ...book, cover: recToBlob(cover), failed }
 }
 
 // Reconstruye un Blob a partir de lo guardado. Soporta el formato nuevo
