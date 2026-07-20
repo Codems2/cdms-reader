@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Library from './components/Library.jsx'
 import Reader from './components/Reader.jsx'
 import { useOnline } from './hooks/useOnline.js'
@@ -51,6 +51,17 @@ export default function App() {
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
+
+  // iOS/iPadOS: Safari tiene un bug con la selección de CARPETAS
+  // (webkitdirectory) que devuelve archivos ilegibles ("The I/O read operation
+  // failed"). En esos dispositivos usamos un selector de imágenes múltiple.
+  const isIOS = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    return (
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    )
+  }, [])
 
   const refresh = useCallback(async () => {
     const list = await getBooks()
@@ -179,8 +190,12 @@ export default function App() {
         <span className={`badge-offline ${online ? 'online' : ''}`}>
           {online ? 'En línea' : 'Sin conexión'}
         </span>
-        <button className="btn" onClick={() => folderInputRef.current?.click()}>
-          📁 Carpeta
+        <button
+          className="btn"
+          onClick={() => folderInputRef.current?.click()}
+          title={isIOS ? 'Selecciona varias imágenes' : 'Importar una carpeta de imágenes'}
+        >
+          {isIOS ? '🖼️ Imágenes' : '📁 Carpeta'}
         </button>
         <button className="btn primary" onClick={() => fileInputRef.current?.click()}>
           ＋ Importar
@@ -209,15 +224,16 @@ export default function App() {
           e.target.value = ''
         }}
       />
+      {/* En iOS: selector de imágenes múltiple (evita el webkitdirectory roto).
+          En el resto: selección de carpeta real. */}
       <input
         ref={folderInputRef}
         className="visually-hidden"
         type="file"
-        webkitdirectory=""
-        directory=""
         multiple
+        {...(isIOS ? { accept: 'image/*' } : { webkitdirectory: '', directory: '' })}
         onChange={(e) => {
-          handleFiles(e.target.files, { asFolder: true })
+          handleFiles(e.target.files, { asFolder: !isIOS })
           e.target.value = ''
         }}
       />
