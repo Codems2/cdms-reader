@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = { mode: 'paged-rtl', fit: 'contain' }
 // Agrupa imágenes en "mangas": una carpeta = un manga. Si vienen de una
 // selección de archivos sueltos (sin rutas), todas forman un único manga.
 function groupImages(images, asFolder) {
+  if (images.length === 0) return []
   const hasPaths = images.some((f) => f.webkitRelativePath)
   if (!asFolder && !hasPaths) {
     const title =
@@ -91,54 +92,60 @@ export default function App() {
       )
       const images = files.filter((f) => detectFormat(f) === 'image')
 
-      try {
-        let totalFailedPages = 0
+      if (containers.length === 0 && images.length === 0) {
+        setImporting(null)
+        alert('No se encontraron archivos compatibles (CBZ, ZIP, CBR, PDF o imágenes).')
+        return
+      }
 
-        // 1) Cada CBZ/ZIP/CBR/PDF -> su propio manga.
-        for (const file of containers) {
-          setImporting({ label: `Leyendo ${file.name}…`, progress: 0 })
-          const result = await importFile(file)
+      // Construye la lista de trabajos: cada contenedor y cada grupo de imágenes.
+      const jobs = [
+        ...containers.map((file) => ({
+          name: file.name,
+          make: async () => importFile(file),
+        })),
+        ...groupImages(images, asFolder).map((g) => ({
+          name: g.title,
+          make: async () => importImages(g.files, g.title),
+        })),
+      ]
+
+      let totalFailedPages = 0
+      const failedBooks = []
+
+      // Importamos manga a manga; si uno falla, seguimos con el resto.
+      for (let j = 0; j < jobs.length; j++) {
+        const job = jobs[j]
+        const prefix = jobs.length > 1 ? `(${j + 1}/${jobs.length}) ` : ''
+        try {
+          setImporting({ label: `${prefix}Leyendo ${job.name}…`, progress: 0 })
+          const result = await job.make()
           const book = await addBook(result, (p) =>
-            setImporting({ label: `Importando ${file.name}… (${Math.round(p * 100)}%)`, progress: p }),
+            setImporting({
+              label: `${prefix}Importando ${job.name}… (${Math.round(p * 100)}%)`,
+              progress: p,
+            }),
           )
           totalFailedPages += book.failed || 0
+        } catch (err) {
+          failedBooks.push(job.name)
         }
+      }
 
-        // 2) Imágenes agrupadas por carpeta (un manga por carpeta).
-        if (images.length > 0) {
-          const groups = groupImages(images, asFolder)
-          for (const g of groups) {
-            setImporting({ label: `Importando ${g.title}…`, progress: 0 })
-            const result = importImages(g.files, g.title)
-            const book = await addBook(result, (p) =>
-              setImporting({ label: `Importando ${g.title}… (${Math.round(p * 100)}%)`, progress: p }),
-            )
-            totalFailedPages += book.failed || 0
-          }
-        }
+      await refresh()
+      setImporting(null)
 
-        if (containers.length === 0 && images.length === 0) {
-          throw new Error(
-            'No se encontraron archivos compatibles (CBZ, ZIP, CBR, PDF o imágenes).',
-          )
-        }
-        await refresh()
-        if (totalFailedPages > 0) {
-          alert(
-            `Importado, pero ${totalFailedPages} página(s) no se pudieron leer y se omitieron. ` +
-              `Si están en iCloud, descárgalas antes en la app Archivos.`,
-          )
-        }
-      } catch (err) {
-        const ioError =
-          err?.name === 'NotReadableError' || /I\/O read|operation failed/i.test(err?.message || '')
+      if (failedBooks.length > 0) {
+        const list = failedBooks.slice(0, 5).join(', ') + (failedBooks.length > 5 ? '…' : '')
         alert(
-          ioError
-            ? 'Error al importar: no se pudo leer el archivo. Si está en iCloud, ábrelo primero en la app Archivos para descargarlo (o cópialo al dispositivo) y vuelve a intentarlo.'
-            : `Error al importar: ${err.message}`,
+          `No se pudieron importar ${failedBooks.length} de ${jobs.length}: ${list}.\n` +
+            `En iPad/iPhone, evita la selección de carpetas; elige los archivos desde Archivos ` +
+            `(descárgalos antes si están en la nube).`,
         )
-      } finally {
-        setImporting(null)
+      } else if (totalFailedPages > 0) {
+        alert(
+          `Importado, pero ${totalFailedPages} página(s) no se pudieron leer y se omitieron.`,
+        )
       }
     },
     [refresh],
@@ -193,9 +200,13 @@ export default function App() {
         <button
           className="btn"
           onClick={() => folderInputRef.current?.click()}
-          title={isIOS ? 'Selecciona varias imágenes' : 'Importar una carpeta de imágenes'}
+          title={
+            isIOS
+              ? 'Elegir imágenes o archivos desde Archivos/Drive'
+              : 'Importar una carpeta de imágenes'
+          }
         >
-          {isIOS ? '🖼️ Imágenes' : '📁 Carpeta'}
+          {isIOS ? '📂 Archivos' : '📁 Carpeta'}
         </button>
         <button className="btn primary" onClick={() => fileInputRef.current?.click()}>
           ＋ Importar
@@ -224,14 +235,16 @@ export default function App() {
           e.target.value = ''
         }}
       />
-      {/* En iOS: selector de imágenes múltiple (evita el webkitdirectory roto).
-          En el resto: selección de carpeta real. */}
+      {/* En iOS: selección múltiple normal SIN accept, para que el selector
+          ofrezca la app Archivos (iCloud, Google Drive, etc.) y no solo Fotos;
+          además evita el webkitdirectory roto de Safari. En el resto del mundo:
+          selección de carpeta real. */}
       <input
         ref={folderInputRef}
         className="visually-hidden"
         type="file"
         multiple
-        {...(isIOS ? { accept: 'image/*' } : { webkitdirectory: '', directory: '' })}
+        {...(isIOS ? {} : { webkitdirectory: '', directory: '' })}
         onChange={(e) => {
           handleFiles(e.target.files, { asFolder: !isIOS })
           e.target.value = ''

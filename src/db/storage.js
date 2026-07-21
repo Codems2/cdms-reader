@@ -29,9 +29,36 @@ function getDB() {
           db.createObjectStore('settings', { keyPath: 'key' })
         }
       },
+      // Si el navegador cierra la conexión de golpe (típico en iOS bajo carga),
+      // descartamos la promesa para que la próxima operación reabra la BD.
+      terminated() {
+        dbPromise = null
+      },
     })
   }
   return dbPromise
+}
+
+// Guarda un valor reabriendo la conexión y reintentando si iOS la cerró a
+// media importación ("the connection is closing/closed").
+async function putSafe(storeName, value) {
+  let lastErr
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const db = await getDB()
+      await db.put(storeName, value)
+      return
+    } catch (err) {
+      lastErr = err
+      const closed = /clos(e|ing)|InvalidStateError|connection|transaction/i.test(
+        `${err?.name} ${err?.message}`,
+      )
+      if (!closed) throw err
+      dbPromise = null // fuerza reapertura
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)))
+    }
+  }
+  throw lastErr
 }
 
 function makeId() {
@@ -42,7 +69,6 @@ function makeId() {
 // --- Libros ---------------------------------------------------------------
 
 export async function addBook({ title, format, pages, source }, onProgress) {
-  const db = await getDB()
   const id = makeId()
 
   // Guardamos PÁGINA A PÁGINA en transacciones pequeñas e independientes:
@@ -88,7 +114,7 @@ export async function addBook({ title, format, pages, source }, onProgress) {
       continue
     }
     size += data.byteLength
-    await db.put('pages', {
+    await putSafe('pages', {
       bookId: id,
       index: stored,
       name: pages[i].name ?? `page-${stored}`,
@@ -119,7 +145,7 @@ export async function addBook({ title, format, pages, source }, onProgress) {
     createdAt: Date.now(),
     incomplete: failed > 0 ? failed : undefined,
   }
-  await db.put('books', book)
+  await putSafe('books', book)
   return { ...book, cover: recToBlob(cover), failed }
 }
 
